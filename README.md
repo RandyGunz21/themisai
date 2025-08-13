@@ -174,8 +174,9 @@ Our architecture is guided by these core principles to ensure a robust and scala
 
 | Category | Technology | Rationale for Selection |
 | :--- | :--- | :--- |
-| **Backend** | Python & FastAPI | The industry standard for AI/ML, offering high performance and first-class asynchronous support. |
-| **Frontend** | Next.js (React) | A leading framework for building fast, modern, and SEO-friendly web applications. |
+| **Backend Runtime** | **Python** & FastAPI | The industry standard for AI/ML, offering high performance and first-class asynchronous support. |
+| **Frontend Runtime**| **Bun** | A modern, all-in-one JavaScript runtime and toolkit chosen for its exceptional performance and simplified developer experience. |
+| **Frontend Framework**| Next.js (React) | A leading framework for building fast, modern, and SEO-friendly web applications, fully compatible with the Bun runtime. |
 | **UI Library** | Shadcn/ui | A highly customizable and accessible component library for accelerating UI development. |
 | **Agentic Logic** | LangGraph | Essential for orchestrating the complex, stateful, and potentially cyclical workflows of our agentic system. |
 | **RAG Framework** | LlamaIndex | A comprehensive framework that simplifies and optimizes the entire RAG pipeline. |
@@ -305,13 +306,13 @@ The user's journey is designed for clarity and transparency.
 
 ### 9.1 Local Development (using Docker Compose)
 
-This setup uses Docker Compose to orchestrate the entire application stack locally. The `docker-compose.yml` file is configured to **pull official Docker images for all infrastructure components** (PostgreSQL, Kafka, Qdrant, Redis) and build images for our custom AI agent services. This ensures a consistent, one-command setup.
+This setup uses Docker Compose to orchestrate the entire application stack locally. The `docker-compose.yml` file is configured to **pull official Docker images for all infrastructure components** (PostgreSQL, Kafka, etc.) and build images for our custom services.
 
 #### Prerequisites
 *   Git
 *   Docker & Docker Compose
-*   Python 3.10+ & Poetry
-*   Node.js 18+
+*   **Bun** (for managing the frontend locally)
+*   Python 3.10+ & Poetry (for managing backend services)
 *   API Keys for external services (Cohere, OpenAI/Anthropic, etc.)
 
 #### Configuration
@@ -332,7 +333,7 @@ This setup uses Docker Compose to orchestrate the entire application stack local
 1.  **Start All Services:**
     From the project's root directory, launch all services in detached mode.
     ```bash
-    docker-compose up -d
+    docker-compose up -d --build
     ```
 2.  **Verify Services:**
     Check the status of all running containers.
@@ -341,6 +342,45 @@ This setup uses Docker Compose to orchestrate the entire application stack local
     ```
 3.  **Access the Application:**
     Open your browser and navigate to `http://localhost:3000`.
+
+#### Frontend Development with Bun
+
+The frontend service is powered by Bun. To work on it locally:
+1.  Navigate to the frontend directory: `cd frontend`
+2.  Install dependencies using Bun's fast package manager: `bun install`
+3.  Run the development server: `bun run dev`
+
+#### Frontend Dockerfile Example (`frontend/Dockerfile`)
+
+The Dockerfile for the frontend service must be updated to use Bun's official image and commands.
+
+```Dockerfile
+# Stage 1: Install dependencies
+FROM oven/bun:1.0 as deps
+WORKDIR /app
+
+# Copy package.json and bun.lockb to leverage Docker cache
+COPY package.json bun.lockb ./
+RUN bun install --frozen-lockfile
+
+# Stage 2: Build the application
+FROM deps as builder
+WORKDIR /app
+COPY . .
+RUN bun run build
+
+# Stage 3: Production image
+FROM oven/bun:1.0 as runner
+WORKDIR /app
+
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+
+EXPOSE 3000
+CMD ["bun", "start"]
+```
 
 ### 9.2 Production Deployment (using Kubernetes)
 
