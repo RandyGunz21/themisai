@@ -1,6 +1,10 @@
+Of course. Here is the complete and final version of the Project ThemisAI System Design & Architecture document. As requested, the entire content is rewritten to provide a clean, cohesive, and definitive blueprint for your project.
+
+---
+
 # Project ThemisAI: System Design & Architecture
 
-**Version:** 2.1
+**Version:** 2.3
 **Last Updated:** August 12, 2025
 
 ## Table of Contents
@@ -16,7 +20,7 @@
     *   [Architectural Principles](#architectural-principles)
 4.  [Technology Stack](#4-technology-stack)
 5.  [Core Components (Microservices)](#5-core-components-microservices)
-    *   [I/O Agent (Frontend Gateway)](#io-agent-frontend-gateway)
+    *   [I/O Agent (Conversational Gateway)](#io-agent-conversational-gateway)
     *   [Supervisor Agent (Central Orchestrator)](#supervisor-agent-central-orchestrator)
     *   [Legal Researcher Agent](#legal-researcher-agent)
     *   [Legal Documents Drafter Agent](#legal-documents-drafter-agent)
@@ -34,7 +38,7 @@
 
 ### Vision
 
-Project **ThemisAI** is an initiative to build a state-of-the-art, AI-powered web application that serves as an intelligent legal assistant. Our vision is to democratize access to legal knowledge by providing intuitive, accurate, and instant tools for legal research, document drafting, and compliance review.
+Project **ThemisAI** is an initiative to build a state-of-the-art, AI-powered web application that serves as an intelligent legal assistant. Our vision is to democratize access to legal knowledge by providing a guided, conversational, and accurate platform for legal research, document drafting, and compliance review within its defined domains.
 
 ### Core Features
 
@@ -123,58 +127,43 @@ graph TD
         A[Next.js Frontend]
     end
 
-    subgraph "I/O Agent (FastAPI)"
+    subgraph "I/O Agent (Conversational Gateway)"
         B(API Endpoint)
-        C(SSE Endpoint for Real-time Updates)
+        LLM_IO[Conversational LLM]
+        Tool(Tool: create_legal_ticket)
     end
 
     subgraph "Kafka Cluster"
         K1(ticket.new)
-        K2(request.*)
-        K3(result.*)
-        K4(ticket.status.updates)
-        K5(system.logs)
     end
 
-    subgraph "AI Agentic System"
-        D(Supervisor Agent - LangGraph)
-        E(Legal Researcher Agent - LlamaIndex)
-        F(Legal Drafter Agent)
-        G(Legal Reviewer Agent)
+    subgraph "Backend Agentic System"
+        D(Supervisor Agent)
+        E(...)
     end
 
-    subgraph "Data & External Services"
-        H[PostgreSQL]
-        I[Qdrant Vector DB]
-        J[Cohere Rerank API]
-        L[Cache - Redis]
+    A <--> B
+    B -- "User Input" --> LLM_IO
+    LLM_IO -- "Decides Action" --> B
+    
+    subgraph "Decision Flow"
+        direction LR
+        LLM_IO -- "If Legal & In-Scope" --> Tool
+        LLM_IO -- "If Non-Legal/Chat" --> B
     end
 
-    A -- HTTP Request --> B
-    B -- Publishes to --> K1
-    K1 -- Consumed by --> D
-    D -- Publishes to --> K2
-    K2 -- Consumed by --> E
-    K2 -- Consumed by --> F
-    K2 -- Consumed by --> G
-    E -- Publishes to --> K3
-    F -- Publishes to --> K3
-    G -- Publishes to --> K3
-    K3 -- Consumed by --> D
-    D -- Publishes to --> K4
-    K4 -- Consumed by --> C
-    C -- Pushes real-time status --> A
-    D -- Writes state to --> H
-    E -- Queries/Writes --> I
-    E -- Reads from --> L
-    E -- Calls API --> J
+    Tool -- "Publishes Payload" --> K1
+    B -- "Conversational Reply" --> A
+    K1 --> D
+    D -- Orchestrates --> E
 ```
 
 ### Architectural Principles
 
 Our architecture is guided by these core principles to ensure a robust and scalable system:
 
-*   **Independent Microservices:** Each AI Agent (Supervisor, Researcher, etc.) is a **fully independent, containerized service**. This principle allows teams to develop, deploy, scale, and maintain each agent's functionality without impacting the rest of the system.
+*   **Conversational Intake & Tool-Based Handoff:** The system begins with a sophisticated conversational agent (the I/O Agent). It uses an LLM to understand intent and only triggers the main backend workflow by calling a specific "tool" when a valid, in-scope legal request is identified.
+*   **Independent Microservices:** Each AI Agent (Supervisor, Researcher, etc.) is a **fully independent, containerized service**. This allows teams to develop, deploy, and scale each agent's functionality without impacting the rest of the system.
 *   **Asynchronous Communication:** The system is built around an event-driven model using Apache Kafka, ensuring resilience to component failures and enabling horizontal scaling.
 *   **AI-Native:** The architecture is purpose-built to support sophisticated AI workflows, featuring advanced state management with LangGraph and a high-accuracy RAG pipeline.
 *   **User-Centric:** User experience is paramount. Real-time status updates are implemented to provide transparency and keep the user engaged throughout the process.
@@ -200,24 +189,29 @@ Our architecture is guided by these core principles to ensure a robust and scala
 
 ## 5. Core Components (Microservices)
 
-The ThemisAI backend is composed of the following specialized and **independent microservices**. Each service has a clearly defined responsibility and communicates with others via the Kafka message bus.
+The ThemisAI backend is composed of the following specialized and **independent microservices**.
 
-### I/O Agent (Frontend Gateway)
+### I/O Agent (Conversational Gateway)
 
-*   **Purpose:** To act as the primary interface between the user and the complex backend system.
-*   **Key Responsibilities:**
-    1.  Serves the responsive user interface built with Next.js and Shadcn/ui.
-    2.  Receives and validates user requests through its secure FastAPI backend.
-    3.  Generates a unique `Ticket ID` and initiates a workflow by publishing a task to the `ticket.new` Kafka topic.
-    4.  Exposes a **Server-Sent Events (SSE)** endpoint to stream real-time status updates to the frontend.
-    5.  Presents the final, synthesized answer to the user in a clear and structured format.
+*   **Purpose:** To act as the intelligent, conversational "front door" to the entire system, managing user interaction and qualifying requests before engaging the main workflow.
+*   **Core Logic:** This agent is powered by its own LLM instance, configured with a specific system prompt and a defined set of tools. The prompt instructs the LLM on its persona, its capabilities, and its limitations.
+*   **Key Responsibilities & Workflow:**
+    1.  **Conversational Intake:** All user input is first processed by this agent's LLM.
+    2.  **Intent Recognition:** Using its prompting and internal logic, the LLM determines the user's intent. Is it a simple greeting? A question about the system's purpose? Or a specific legal query?
+    3.  **Handle Non-Legal/Out-of-Scope Chat:** If the query is identified as non-legal, out-of-scope, or general conversation, the agent responds conversationally without triggering any backend processes. It can answer questions about itself, clarify its purpose, and gracefully guide the user toward making a valid legal request. **No ticket is created in this mode.**
+    4.  **Identify In-Scope Legal Queries:** When the agent's LLM recognizes a legal problem that falls within its predefined capabilities (e.g., "draft a non-disclosure agreement," "review this contract clause"), it decides to use its specialized tool.
+    5.  **Tool Calling:** The LLM invokes the `create_legal_ticket` tool. This is a predefined Python function available to the agent. The function is responsible for:
+        *   Generating a unique, secure `Ticket ID`.
+        *   Structuring the user's problem and conversational context into a standardized JSON payload.
+        *   Publishing this payload to the `ticket.new` Kafka topic.
+    6.  **Confirm Handoff:** After the `create_legal_ticket` tool executes successfully, the agent informs the user that their case has been accepted and is now being processed (e.g., "Thank you. I've created ticket #12345 and our specialized agents are now working on your request. You will see live updates below."). This is the point where the real-time SSE updates begin.
 
 ### Supervisor Agent (Central Orchestrator)
 
-*   **Purpose:** To serve as the "brain" of the operation, managing the entire lifecycle of a user request.
+*   **Purpose:** To serve as the "brain" of the operation, managing the entire lifecycle of a user request **after it has been approved and ticketed by the I/O Agent**.
 *   **Key Responsibilities:**
-    1.  Utilizes **LangGraph** to model the workflow as a stateful graph, allowing for complex logic, retries, and cycles.
-    2.  Consumes new tasks from `ticket.new` and results from all `result.*` topics.
+    1.  Utilizes **LangGraph** to model the workflow as a stateful graph.
+    2.  Consumes new, validated tasks from the `ticket.new` topic.
     3.  Decomposes user problems into discrete tasks and delegates them to the appropriate specialized agents.
     4.  Publishes user-friendly status updates to the `ticket.status.updates` topic at each significant state transition.
     5.  Synthesizes findings from all agents into a single, coherent, and comprehensive final response.
@@ -227,19 +221,18 @@ The ThemisAI backend is composed of the following specialized and **independent 
 *   **Purpose:** To perform deep, accurate, and citation-backed legal research.
 *   **Key Responsibilities:**
     1.  Consumes research tasks from the `request.research` topic.
-    2.  Executes an advanced RAG pipeline using **LlamaIndex** (detailed in Section 7).
+    2.  Executes an advanced RAG pipeline using **LlamaIndex**.
     3.  Retrieves document candidates from the **Qdrant** vector database.
     4.  Leverages the **Cohere Rerank API** to ensure the highest possible relevance of source materials.
-    5.  Generates concise summaries and extracts key insights from the top-ranked documents.
-    6.  Publishes its structured findings to the `result.research` topic.
+    5.  Publishes its structured findings to the `result.research` topic.
 
 ### Legal Documents Drafter Agent
 
 *   **Purpose:** To generate well-structured drafts of legal documents.
 *   **Key Responsibilities:**
     1.  Consumes drafting tasks from the `request.drafting` topic.
-    2.  Receives a rich context from the Supervisor, including user specifications and relevant legal research.
-    3.  Utilizes a powerful LLM to generate the document draft according to the provided instructions.
+    2.  Receives a rich context from the Supervisor.
+    3.  Utilizes a powerful LLM to generate the document draft.
     4.  Publishes the final document to the `result.drafting` topic.
 
 ### Legal Documents Reviewer Agent
@@ -247,9 +240,9 @@ The ThemisAI backend is composed of the following specialized and **independent 
 *   **Purpose:** To analyze and provide feedback on existing legal documents.
 *   **Key Responsibilities:**
     1.  Consumes review tasks from the `request.review` topic.
-    2.  Analyzes the content and structure of user-uploaded documents.
-    3.  Can initiate a research sub-task via the Supervisor to verify specific clauses against current law.
-    4.  Publishes a detailed analysis, highlighting potential risks and recommendations, to the `result.review` topic.
+    2.  Analyzes user-uploaded documents.
+    3.  Can initiate a research sub-task via the Supervisor.
+    4.  Publishes its analysis and recommendations to the `result.review` topic.
 
 ---
 
@@ -257,7 +250,7 @@ The ThemisAI backend is composed of the following specialized and **independent 
 
 | Topic Name | Example Message Payload | Producer | Consumers |
 | :--- | :--- | :--- | :--- |
-| `ticket.new` | `{"ticket_id": "...", "user_query": "..."}` | I/O Agent | Supervisor Agent |
+| `ticket.new` | `{"ticket_id": "...", "user_query": "..."}` | I/O Agent (via Tool Call) | Supervisor Agent |
 | `request.research`| `{"ticket_id": "...", "research_task": "..."}` | Supervisor Agent | Legal Researcher |
 | `result.research` | `{"ticket_id": "...", "summary": "...", "sources": [...]}` | Legal Researcher | Supervisor Agent |
 | `ticket.status.updates`| `{"ticket_id": "...", "status_message": "..."}` | Supervisor Agent | I/O Agent (SSE) |
@@ -294,17 +287,17 @@ sequenceDiagram
 
 ## 8. Real-time User Experience (UX) Flow
 
-We ensure the user never feels left in the dark during a complex background process.
+The user's journey is designed for clarity and transparency.
 
-1.  **User Submits Query:** The user types a question and hits "Enter."
-2.  **UI Responds Instantly:** The Next.js frontend immediately opens an SSE connection to the I/O Agent's backend and displays an initial status like "Connecting...".
-3.  **Supervisor Publishes Status:** As the Supervisor Agent begins the workflow in LangGraph, it publishes the first message to `ticket.status.updates`, e.g., `{"status_message": "✅ Request received. Beginning analysis..."}`.
-4.  **Status Streamed to UI:** The I/O Agent's backend receives this message from Kafka and instantly pushes it through the SSE connection to the user's browser. The UI updates dynamically.
-5.  **Continuous Updates:** This process continues for every significant step:
-    *   `⏳ Researching relevant regulations...`
-    *   `🎯 Relevant documents found. Analyzing...`
-    *   `✍️ Composing final answer...`
-6.  **Final Result:** Once the final answer is ready, the SSE connection can be closed, and the full result is displayed.
+1.  **Conversational Intake:** The user starts a conversation. The UI is a standard chat interface.
+2.  **Initial Interaction:** The I/O Agent engages in conversation. If the user asks "What can you do?", it explains its capabilities. If the user says "Hello", it responds politely. This phase is fully handled by the I/O Agent.
+3.  **Handoff Point:** The user asks a valid legal question like, "Can you draft an NDA for a software project?"
+4.  **Tool Call & Confirmation:** The I/O Agent recognizes this as an in-scope task. The UI might show a brief "Thinking..." indicator. Then, the agent responds: "Certainly. I can help with that. I'm creating a ticket to begin the drafting process. You'll see live progress below."
+5.  **Workflow Updates:** The UI now switches to receiving SSE updates, showing the backend progress:
+    *   `✅ Ticket #56789 created.`
+    *   `⏳ Researching standard NDA clauses...`
+    *   `✍️ Drafting your document...`
+6.  **Final Result:** Once the workflow is complete, the final, detailed answer and the drafted document are displayed.
 
 ---
 
@@ -312,7 +305,7 @@ We ensure the user never feels left in the dark during a complex background proc
 
 ### 9.1 Local Development (using Docker Compose)
 
-This setup uses Docker Compose to orchestrate the entire application stack locally. The `docker-compose.yml` file is configured to **pull official Docker images for all infrastructure components** (PostgreSQL, Kafka, Qdrant, Redis) and build images for our custom AI agent services. This ensures a consistent, one-command setup without needing to manually install any databases or message brokers.
+This setup uses Docker Compose to orchestrate the entire application stack locally. The `docker-compose.yml` file is configured to **pull official Docker images for all infrastructure components** (PostgreSQL, Kafka, Qdrant, Redis) and build images for our custom AI agent services. This ensures a consistent, one-command setup.
 
 #### Prerequisites
 *   Git
@@ -348,9 +341,6 @@ This setup uses Docker Compose to orchestrate the entire application stack local
     ```
 3.  **Access the Application:**
     Open your browser and navigate to `http://localhost:3000`.
-
-4.  **Development Workflow:**
-    This project adheres to the structured package layout defined in **Section 2**. When working on a specific Python service, navigate to its directory (e.g., `services/supervisor_agent`) to manage its dependencies with `poetry` and run its tests.
 
 ### 9.2 Production Deployment (using Kubernetes)
 
