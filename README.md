@@ -1,6 +1,6 @@
 # Project ThemisAI: System Design & Architecture
 
-**Version:** 2.5
+**Version:** 2.6
 **Last Updated:** August 12, 2025
 
 ## Table of Contents
@@ -26,7 +26,7 @@
 8.  [Real-time User Experience (UX) Flow](#8-real-time-user-experience-ux-flow)
 9.  [Getting Started (Developer Guide)](#9-getting-started-developer-guide)
     *   [9.1 Local Development (using Docker Compose)](#91-local-development-using-docker-compose)
-    *   [9.2 Production Deployment (using Kubernetes)](#92-production-deployment-using-kubernetes)
+    *   [9.2 Production Deployment (using Google Kubernetes Engine - GKE)](#92-production-deployment-using-google-kubernetes-engine---gke)
 
 ---
 
@@ -162,7 +162,7 @@ graph TD
 
 Our architecture is guided by these core principles to ensure a robust and scalable system:
 
-*   **Distributed Reasoning with LangGraph:** **Every backend AI agent** (Supervisor, Researcher, Drafter, Reviewer) employs its own internal LangGraph. This distributes reasoning capabilities, allowing each specialized agent to perform complex, multi-step tasks with internal logic, state management, and self-correction loops. This moves beyond simple tool use to a model of expert delegation.
+*   **Distributed Reasoning with LangGraph:** **Every backend AI agent** (Supervisor, Researcher, Drafter, Reviewer) employs its own internal LangGraph. This distributes reasoning capabilities, allowing each specialized agent to perform complex, multi-step tasks with internal logic, state management, and self-correction loops.
 *   **Conversational Intake & Tool-Based Handoff:** The system begins with a sophisticated conversational agent (the I/O Agent) that uses an LLM to understand intent and only triggers the main backend workflow by calling a specific "tool" when a valid, in-scope legal request is identified.
 *   **Independent Microservices:** Each AI Agent is a **fully independent, containerized service**. This allows teams to develop, deploy, and scale each agent's functionality without impacting the rest of the system.
 *   **Asynchronous Communication:** The system is built around an event-driven model using Apache Kafka, ensuring resilience to component failures and enabling horizontal scaling.
@@ -173,11 +173,12 @@ Our architecture is guided by these core principles to ensure a robust and scala
 
 | Category | Technology | Rationale for Selection |
 | :--- | :--- | :--- |
-| **Backend Runtime** | **Python** & FastAPI | The industry standard for AI/ML, offering high performance and first-class asynchronous support. |
-| **Frontend Runtime**| **Bun** | A modern, all-in-one JavaScript runtime and toolkit chosen for its exceptional performance and simplified developer experience. |
+| **Large Language Model**| **GPT-5** (or equivalent SOTA model) | Chosen for its anticipated superior reasoning, complex instruction-following, and tool-calling capabilities, which are critical for the advanced logic of all agents. |
+| **Backend Runtime** | Python & FastAPI | The industry standard for AI/ML, offering high performance and first-class asynchronous support. |
+| **Frontend Runtime**| Bun | A modern, all-in-one JavaScript runtime and toolkit chosen for its exceptional performance and simplified developer experience. |
 | **Frontend Framework**| Next.js (React) | A leading framework for building fast, modern, and SEO-friendly web applications, fully compatible with the Bun runtime. |
 | **UI Library** | Shadcn/ui | A highly customizable and accessible component library for accelerating UI development. |
-| **Core Agentic Logic**| **LangGraph** | **The core framework for implementing the internal state machines and reasoning graphs for all backend AI agents.** |
+| **Core Agentic Logic**| LangGraph | The core framework for implementing the internal state machines and reasoning graphs for all backend AI agents. |
 | **RAG Framework** | LlamaIndex | A comprehensive framework that simplifies and optimizes the entire RAG pipeline, often used as a component within a LangGraph node. |
 | **Vector Database**| Qdrant | A high-performance, production-ready vector database optimized for semantic search. |
 | **Reranking** | Cohere Rerank API | Delivers State-of-the-Art (SOTA) accuracy for document relevance with excellent multilingual support. |
@@ -189,47 +190,36 @@ Our architecture is guided by these core principles to ensure a robust and scala
 
 ## 5. Core Components (Microservices)
 
-The ThemisAI backend is composed of the following specialized and **independent microservices**, each with its own internal reasoning capabilities.
+The ThemisAI backend is composed of the following specialized and **independent microservices**, each leveraging the advanced capabilities of the **GPT-5** model.
 
 ### I/O Agent (Conversational Gateway)
 
-*   **Purpose:** To act as the intelligent, conversational "front door" to the entire system. **This is the only agent that does not use LangGraph**, as its role is purely conversational and stateless handoff.
+*   **Purpose:** To act as the intelligent, conversational "front door" to the entire system.
 *   **Core Logic & Workflow:**
-    1.  **Conversational Intake:** All user input is processed by this agent's LLM.
+    1.  **Conversational Intake:** All user input is processed by a **GPT-5** instance fine-tuned for conversational flow and intent recognition.
     2.  **Intent Recognition & Chat:** It handles all non-legal and out-of-scope conversation directly.
-    3.  **Tool Calling:** When it identifies an in-scope legal query, it invokes the `create_legal_ticket` tool, which publishes the task to Kafka.
+    3.  **Tool Calling:** When it identifies an in-scope legal query, it invokes the `create_legal_ticket` tool.
     4.  **Confirm Handoff:** It confirms ticket creation with the user, at which point the real-time SSE updates from the backend system begin.
 
 ### Supervisor Agent (High-Level Orchestrator)
 
 *   **Purpose:** To manage the high-level lifecycle of a user request after it has been ticketed.
-*   **LangGraph Implementation:** Its graph is responsible for macro-level orchestration. Nodes in its graph represent high-level states like `AWAITING_RESEARCH`, `AWAITING_DRAFT`, `PENDING_FINAL_REVIEW`. Its edges are conditional, routing the overall task based on the results from the specialized agents. It delegates complex micro-tasks, but does not perform them itself.
+*   **LangGraph Implementation:** Its graph, powered by **GPT-5's** reasoning, is responsible for macro-level orchestration. It delegates complex micro-tasks to the specialized agents.
 
 ### Legal Researcher Agent (Reasoning & Research)
 
 *   **Purpose:** To perform deep, accurate, and citation-backed legal research as a multi-step process.
-*   **LangGraph Implementation:** It uses its own internal LangGraph to manage a sophisticated research process. This is not a simple linear task. Its graph can include nodes and conditional edges for:
-    *   `Query Analysis`: Deconstructing the user's request.
-    *   `Sub-Query Decomposition`: Breaking a complex question into smaller, researchable parts.
-    *   `Parallel RAG Execution`: Running the RAG pipeline (retrieve, rerank, synthesize) for each sub-query.
-    *   `Self-Critique & Refinement`: A final node that reviews the synthesized answer against the original request, potentially looping back to refine the research if gaps are found.
+*   **LangGraph Implementation:** It uses its own internal LangGraph to manage a sophisticated research process. **GPT-5** enables complex query decomposition and self-critique loops for higher accuracy.
 
 ### Legal Documents Drafter Agent (Structured Drafting)
 
 *   **Purpose:** To generate well-structured drafts of legal documents in a robust, step-by-step manner.
-*   **LangGraph Implementation:** It employs LangGraph to structure the drafting process, moving beyond a single LLM call. Its graph may involve nodes for:
-    *   `Outline Generation`: Creating a high-level structure for the document.
-    *   `Sectional Drafting`: Drafting individual sections (e.g., "Preamble," "Definitions," "Clauses") in sequence or parallel.
-    *   `Consistency Check`: A node that reviews the entire draft to ensure consistent terminology and cross-referencing.
-    *   `Final Formatting`: Applying final formatting rules.
+*   **LangGraph Implementation:** It employs LangGraph to structure the drafting process. **GPT-5's** advanced generation capabilities are leveraged for drafting individual sections and ensuring overall consistency.
 
 ### Legal Documents Reviewer Agent (Analytical Review)
 
 *   **Purpose:** To analyze and provide feedback on existing legal documents with a structured, multi-pass approach.
-*   **LangGraph Implementation:** It leverages LangGraph to perform a methodical review. Its graph can:
-    *   `Parse Document`: Break the document down into its constituent parts (sections, clauses).
-    *   `Parallel Clause Analysis`: Create parallel tasks to analyze each clause for specific issues (e.g., ambiguity, compliance, enforceability). This step can call the Researcher Agent as a tool.
-    *   `Synthesize Risk Report`: Aggregate all identified issues from the parallel analyses into a final, structured report for the user.
+*   **LangGraph Implementation:** It leverages LangGraph to perform a methodical review, using **GPT-5** to analyze clauses for subtle risks and compliance issues.
 
 ---
 
@@ -292,16 +282,16 @@ The user's journey is designed for clarity and transparency.
 
 ### 9.1 Local Development (using Docker Compose)
 
-This setup uses Docker Compose to orchestrate the entire application stack locally. The `docker-compose.yml` file is configured to **pull official Docker images for all infrastructure components** (PostgreSQL, Kafka, etc.) and build images for our custom services.
+This setup uses Docker Compose to orchestrate the entire application stack locally. The `docker-compose.yml` file is configured to **pull official Docker images for all infrastructure components** and build images for our custom AI agent services.
 
 #### Prerequisites
 *   Git
 *   Docker & Docker Compose
-*   **Bun** (for managing the frontend locally)
-*   Python 3.10+ & Poetry (for managing backend services)
-*   API Keys for external services (Cohere, OpenAI/Anthropic, etc.)
+*   Bun (for managing the frontend locally)
+*   Python 3.10+ & Poetry
+*   API Keys for external services (Cohere, GPT-5 via OpenAI, etc.)
 
-#### Configuration
+#### Configuration & Running
 1.  **Clone the Repository:**
     ```bash
     git clone <your-repository-url>
@@ -368,28 +358,46 @@ EXPOSE 3000
 CMD ["bun", "start"]
 ```
 
-### 9.2 Production Deployment (using Kubernetes)
+### 9.2 Production Deployment (using Google Kubernetes Engine - GKE)
 
-This method outlines deploying **ThemisAI** to a production-grade Kubernetes cluster using Helm.
+This method outlines deploying **ThemisAI** to a production-grade environment on **Google Cloud Platform (GCP)** using its managed Kubernetes service, **GKE**.
 
 #### Prerequisites
-*   `kubectl` configured to access your Kubernetes cluster.
+*   A Google Cloud Platform (GCP) project with billing enabled.
+*   The `gcloud` command-line tool installed and authenticated (`gcloud auth login`).
+*   `kubectl` installed.
 *   `helm` (v3+) installed.
+*   A GKE cluster created in your project.
 
 #### Configuration
 1.  **Create a Namespace:**
-    Isolate the application within its own namespace.
+    Isolate the application within its own namespace for better management.
     ```bash
     kubectl create namespace themisai
     ```
-2.  **Manage Secrets:**
-    Create a Kubernetes Secret to securely store all sensitive credentials.
+2.  **Manage Secrets with Secret Manager:**
+    For production, store all sensitive credentials in **Google Secret Manager**, which is the recommended best practice.
     ```bash
-    kubectl create secret generic themisai-secrets \
-      --namespace themisai \
-      --from-literal=POSTGRES_PASSWORD='YOUR_SECURE_PASSWORD' \
-      --from-literal=COHERE_API_KEY='YOUR_COHERE_API_KEY'
+    # Example of creating a secret in Secret Manager
+    gcloud secrets create cohere-api-key --replication-policy="automatic"
+    echo -n "YOUR_COHERE_API_KEY" | gcloud secrets versions add cohere-api-key --data-file=-
+    
+    gcloud secrets create gpt5-api-key --replication-policy="automatic"
+    echo -n "YOUR_GPT5_API_KEY" | gcloud secrets versions add gpt5-api-key --data-file=-
     ```
+3.  **Set up Workload Identity:**
+    Workload Identity is the secure way to allow your GKE pods to access GCP services (like Secret Manager) without using static JSON keys.
+    *   Create a GCP Service Account (IAM):
+        ```bash
+        gcloud iam service-accounts create themisai-sa --project="YOUR_GCP_PROJECT_ID"
+        ```
+    *   Grant the GCP SA access to your secrets:
+        ```bash
+        gcloud secrets add-iam-policy-binding cohere-api-key \
+          --member="serviceAccount:themisai-sa@YOUR_GCP_PROJECT_ID.iam.gserviceaccount.com" \
+          --role="roles/secretmanager.secretAccessor"
+        ```
+    *   Link the GCP SA to your Kubernetes Service Account (KSA) in your Helm chart's `values.yaml`.
 
 #### Deployment Steps
 1.  **Add Helm Repository:**
@@ -397,25 +405,41 @@ This method outlines deploying **ThemisAI** to a production-grade Kubernetes clu
     helm repo add themisai-charts <url-to-your-helm-repo>
     helm repo update
     ```
-2.  **Configure `values.yaml`:**
-    Create a `my-values.yaml` file to customize the deployment.
+2.  **Configure `values.yaml` for GKE:**
+    Create a `gke-values.yaml` file to customize the deployment for GKE.
     ```yaml
-    # my-values.yaml
-    replicaCount: 2 # Example: scale a service
+    # gke-values.yaml
     
-    secrets:
-      existingSecret: themisai-secrets
-    
+    # Annotate the Kubernetes Service Account to link it to the GCP Service Account
+    serviceAccount:
+      create: true
+      name: "themisai-ksa"
+      annotations:
+        iam.gke.io/gcp-service-account: "themisai-sa@YOUR_GCP_PROJECT_ID.iam.gserviceaccount.com"
+
+    # Ingress configuration for GKE
     ingress:
       enabled: true
+      className: "gce" # Use the GKE Ingress controller
       hosts:
         - host: themis.your-company.com
           paths: ["/"]
     ```
 3.  **Install the Helm Chart:**
-    Deploy the application using your custom values.
+    Deploy **ThemisAI** to your GKE cluster.
     ```bash
     helm install themisai themisai-charts/themisai \
       --namespace themisai \
-      -f my-values.yaml
+      -f gke-values.yaml
+    ```
+
+#### Verification
+1.  **Check Deployment Status:**
+    ```bash
+    kubectl get pods -n themisai
+    ```
+2.  **Access the Application:**
+    GKE Ingress will provision a Google Cloud Load Balancer. Find its external IP address.
+    ```bash
+    kubectl get ingress -n themisai
     ```
