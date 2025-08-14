@@ -1,10 +1,6 @@
-Of course. Here is the complete and final version of the Project ThemisAI System Design & Architecture document. As requested, the entire content is rewritten to provide a clean, cohesive, and definitive blueprint for your project.
-
----
-
 # Project ThemisAI: System Design & Architecture
 
-**Version:** 2.3
+**Version:** 2.5
 **Last Updated:** August 12, 2025
 
 ## Table of Contents
@@ -21,10 +17,10 @@ Of course. Here is the complete and final version of the Project ThemisAI System
 4.  [Technology Stack](#4-technology-stack)
 5.  [Core Components (Microservices)](#5-core-components-microservices)
     *   [I/O Agent (Conversational Gateway)](#io-agent-conversational-gateway)
-    *   [Supervisor Agent (Central Orchestrator)](#supervisor-agent-central-orchestrator)
-    *   [Legal Researcher Agent](#legal-researcher-agent)
-    *   [Legal Documents Drafter Agent](#legal-documents-drafter-agent)
-    *   [Legal Documents Reviewer Agent](#legal-documents-reviewer-agent)
+    *   [Supervisor Agent (High-Level Orchestrator)](#supervisor-agent-high-level-orchestrator)
+    *   [Legal Researcher Agent (Reasoning & Research)](#legal-researcher-agent-reasoning--research)
+    *   [Legal Documents Drafter Agent (Structured Drafting)](#legal-documents-drafter-agent-structured-drafting)
+    *   [Legal Documents Reviewer Agent (Analytical Review)](#legal-documents-reviewer-agent-analytical-review)
 6.  [Data Flow & Kafka Topics](#6-data-flow--kafka-topics)
 7.  [The Advanced RAG Pipeline in Detail](#7-the-advanced-rag-pipeline-in-detail)
 8.  [Real-time User Experience (UX) Flow](#8-real-time-user-experience-ux-flow)
@@ -112,7 +108,7 @@ services/supervisor_agent/
 *   **`app/core/config.py`**: Provides a single, validated source of truth for all environment variables using Pydantic's `BaseSettings`.
 *   **`app/schemas/`**: Defines the data contracts for all inputs and outputs, ensuring data integrity across the system.
 *   **`app/services/`**: Encapsulates business logic decoupled from the web framework, such as processing Kafka messages.
-*   **`app/agent/`**: Contains the specialized AI logic for the agent, such as the LangGraph definition or the LlamaIndex RAG pipeline.
+*   **`app/agent/graph.py`**: **Crucially, this file defines the internal reasoning graph for each agent using LangGraph.**
 *   **`pyproject.toml`**: The modern standard for Python project configuration, defining dependencies, metadata, and scripts for tools like `Poetry` and `pytest`.
 
 ---
@@ -137,9 +133,11 @@ graph TD
         K1(ticket.new)
     end
 
-    subgraph "Backend Agentic System"
+    subgraph "Backend Agentic System (Each with internal LangGraph)"
         D(Supervisor Agent)
-        E(...)
+        E(Researcher Agent)
+        F(Drafter Agent)
+        G(Reviewer Agent)
     end
 
     A <--> B
@@ -155,18 +153,19 @@ graph TD
     Tool -- "Publishes Payload" --> K1
     B -- "Conversational Reply" --> A
     K1 --> D
-    D -- Orchestrates --> E
+    D -- "Delegates Task" --> E
+    D -- "Delegates Task" --> F
+    D -- "Delegates Task" --> G
 ```
 
 ### Architectural Principles
 
 Our architecture is guided by these core principles to ensure a robust and scalable system:
 
-*   **Conversational Intake & Tool-Based Handoff:** The system begins with a sophisticated conversational agent (the I/O Agent). It uses an LLM to understand intent and only triggers the main backend workflow by calling a specific "tool" when a valid, in-scope legal request is identified.
-*   **Independent Microservices:** Each AI Agent (Supervisor, Researcher, etc.) is a **fully independent, containerized service**. This allows teams to develop, deploy, and scale each agent's functionality without impacting the rest of the system.
+*   **Distributed Reasoning with LangGraph:** **Every backend AI agent** (Supervisor, Researcher, Drafter, Reviewer) employs its own internal LangGraph. This distributes reasoning capabilities, allowing each specialized agent to perform complex, multi-step tasks with internal logic, state management, and self-correction loops. This moves beyond simple tool use to a model of expert delegation.
+*   **Conversational Intake & Tool-Based Handoff:** The system begins with a sophisticated conversational agent (the I/O Agent) that uses an LLM to understand intent and only triggers the main backend workflow by calling a specific "tool" when a valid, in-scope legal request is identified.
+*   **Independent Microservices:** Each AI Agent is a **fully independent, containerized service**. This allows teams to develop, deploy, and scale each agent's functionality without impacting the rest of the system.
 *   **Asynchronous Communication:** The system is built around an event-driven model using Apache Kafka, ensuring resilience to component failures and enabling horizontal scaling.
-*   **AI-Native:** The architecture is purpose-built to support sophisticated AI workflows, featuring advanced state management with LangGraph and a high-accuracy RAG pipeline.
-*   **User-Centric:** User experience is paramount. Real-time status updates are implemented to provide transparency and keep the user engaged throughout the process.
 
 ---
 
@@ -178,8 +177,8 @@ Our architecture is guided by these core principles to ensure a robust and scala
 | **Frontend Runtime**| **Bun** | A modern, all-in-one JavaScript runtime and toolkit chosen for its exceptional performance and simplified developer experience. |
 | **Frontend Framework**| Next.js (React) | A leading framework for building fast, modern, and SEO-friendly web applications, fully compatible with the Bun runtime. |
 | **UI Library** | Shadcn/ui | A highly customizable and accessible component library for accelerating UI development. |
-| **Agentic Logic** | LangGraph | Essential for orchestrating the complex, stateful, and potentially cyclical workflows of our agentic system. |
-| **RAG Framework** | LlamaIndex | A comprehensive framework that simplifies and optimizes the entire RAG pipeline. |
+| **Core Agentic Logic**| **LangGraph** | **The core framework for implementing the internal state machines and reasoning graphs for all backend AI agents.** |
+| **RAG Framework** | LlamaIndex | A comprehensive framework that simplifies and optimizes the entire RAG pipeline, often used as a component within a LangGraph node. |
 | **Vector Database**| Qdrant | A high-performance, production-ready vector database optimized for semantic search. |
 | **Reranking** | Cohere Rerank API | Delivers State-of-the-Art (SOTA) accuracy for document relevance with excellent multilingual support. |
 | **Database** | PostgreSQL | A battle-tested relational database, perfect for storing structured data like tickets and user metadata. |
@@ -190,60 +189,47 @@ Our architecture is guided by these core principles to ensure a robust and scala
 
 ## 5. Core Components (Microservices)
 
-The ThemisAI backend is composed of the following specialized and **independent microservices**.
+The ThemisAI backend is composed of the following specialized and **independent microservices**, each with its own internal reasoning capabilities.
 
 ### I/O Agent (Conversational Gateway)
 
-*   **Purpose:** To act as the intelligent, conversational "front door" to the entire system, managing user interaction and qualifying requests before engaging the main workflow.
-*   **Core Logic:** This agent is powered by its own LLM instance, configured with a specific system prompt and a defined set of tools. The prompt instructs the LLM on its persona, its capabilities, and its limitations.
-*   **Key Responsibilities & Workflow:**
-    1.  **Conversational Intake:** All user input is first processed by this agent's LLM.
-    2.  **Intent Recognition:** Using its prompting and internal logic, the LLM determines the user's intent. Is it a simple greeting? A question about the system's purpose? Or a specific legal query?
-    3.  **Handle Non-Legal/Out-of-Scope Chat:** If the query is identified as non-legal, out-of-scope, or general conversation, the agent responds conversationally without triggering any backend processes. It can answer questions about itself, clarify its purpose, and gracefully guide the user toward making a valid legal request. **No ticket is created in this mode.**
-    4.  **Identify In-Scope Legal Queries:** When the agent's LLM recognizes a legal problem that falls within its predefined capabilities (e.g., "draft a non-disclosure agreement," "review this contract clause"), it decides to use its specialized tool.
-    5.  **Tool Calling:** The LLM invokes the `create_legal_ticket` tool. This is a predefined Python function available to the agent. The function is responsible for:
-        *   Generating a unique, secure `Ticket ID`.
-        *   Structuring the user's problem and conversational context into a standardized JSON payload.
-        *   Publishing this payload to the `ticket.new` Kafka topic.
-    6.  **Confirm Handoff:** After the `create_legal_ticket` tool executes successfully, the agent informs the user that their case has been accepted and is now being processed (e.g., "Thank you. I've created ticket #12345 and our specialized agents are now working on your request. You will see live updates below."). This is the point where the real-time SSE updates begin.
+*   **Purpose:** To act as the intelligent, conversational "front door" to the entire system. **This is the only agent that does not use LangGraph**, as its role is purely conversational and stateless handoff.
+*   **Core Logic & Workflow:**
+    1.  **Conversational Intake:** All user input is processed by this agent's LLM.
+    2.  **Intent Recognition & Chat:** It handles all non-legal and out-of-scope conversation directly.
+    3.  **Tool Calling:** When it identifies an in-scope legal query, it invokes the `create_legal_ticket` tool, which publishes the task to Kafka.
+    4.  **Confirm Handoff:** It confirms ticket creation with the user, at which point the real-time SSE updates from the backend system begin.
 
-### Supervisor Agent (Central Orchestrator)
+### Supervisor Agent (High-Level Orchestrator)
 
-*   **Purpose:** To serve as the "brain" of the operation, managing the entire lifecycle of a user request **after it has been approved and ticketed by the I/O Agent**.
-*   **Key Responsibilities:**
-    1.  Utilizes **LangGraph** to model the workflow as a stateful graph.
-    2.  Consumes new, validated tasks from the `ticket.new` topic.
-    3.  Decomposes user problems into discrete tasks and delegates them to the appropriate specialized agents.
-    4.  Publishes user-friendly status updates to the `ticket.status.updates` topic at each significant state transition.
-    5.  Synthesizes findings from all agents into a single, coherent, and comprehensive final response.
+*   **Purpose:** To manage the high-level lifecycle of a user request after it has been ticketed.
+*   **LangGraph Implementation:** Its graph is responsible for macro-level orchestration. Nodes in its graph represent high-level states like `AWAITING_RESEARCH`, `AWAITING_DRAFT`, `PENDING_FINAL_REVIEW`. Its edges are conditional, routing the overall task based on the results from the specialized agents. It delegates complex micro-tasks, but does not perform them itself.
 
-### Legal Researcher Agent
+### Legal Researcher Agent (Reasoning & Research)
 
-*   **Purpose:** To perform deep, accurate, and citation-backed legal research.
-*   **Key Responsibilities:**
-    1.  Consumes research tasks from the `request.research` topic.
-    2.  Executes an advanced RAG pipeline using **LlamaIndex**.
-    3.  Retrieves document candidates from the **Qdrant** vector database.
-    4.  Leverages the **Cohere Rerank API** to ensure the highest possible relevance of source materials.
-    5.  Publishes its structured findings to the `result.research` topic.
+*   **Purpose:** To perform deep, accurate, and citation-backed legal research as a multi-step process.
+*   **LangGraph Implementation:** It uses its own internal LangGraph to manage a sophisticated research process. This is not a simple linear task. Its graph can include nodes and conditional edges for:
+    *   `Query Analysis`: Deconstructing the user's request.
+    *   `Sub-Query Decomposition`: Breaking a complex question into smaller, researchable parts.
+    *   `Parallel RAG Execution`: Running the RAG pipeline (retrieve, rerank, synthesize) for each sub-query.
+    *   `Self-Critique & Refinement`: A final node that reviews the synthesized answer against the original request, potentially looping back to refine the research if gaps are found.
 
-### Legal Documents Drafter Agent
+### Legal Documents Drafter Agent (Structured Drafting)
 
-*   **Purpose:** To generate well-structured drafts of legal documents.
-*   **Key Responsibilities:**
-    1.  Consumes drafting tasks from the `request.drafting` topic.
-    2.  Receives a rich context from the Supervisor.
-    3.  Utilizes a powerful LLM to generate the document draft.
-    4.  Publishes the final document to the `result.drafting` topic.
+*   **Purpose:** To generate well-structured drafts of legal documents in a robust, step-by-step manner.
+*   **LangGraph Implementation:** It employs LangGraph to structure the drafting process, moving beyond a single LLM call. Its graph may involve nodes for:
+    *   `Outline Generation`: Creating a high-level structure for the document.
+    *   `Sectional Drafting`: Drafting individual sections (e.g., "Preamble," "Definitions," "Clauses") in sequence or parallel.
+    *   `Consistency Check`: A node that reviews the entire draft to ensure consistent terminology and cross-referencing.
+    *   `Final Formatting`: Applying final formatting rules.
 
-### Legal Documents Reviewer Agent
+### Legal Documents Reviewer Agent (Analytical Review)
 
-*   **Purpose:** To analyze and provide feedback on existing legal documents.
-*   **Key Responsibilities:**
-    1.  Consumes review tasks from the `request.review` topic.
-    2.  Analyzes user-uploaded documents.
-    3.  Can initiate a research sub-task via the Supervisor.
-    4.  Publishes its analysis and recommendations to the `result.review` topic.
+*   **Purpose:** To analyze and provide feedback on existing legal documents with a structured, multi-pass approach.
+*   **LangGraph Implementation:** It leverages LangGraph to perform a methodical review. Its graph can:
+    *   `Parse Document`: Break the document down into its constituent parts (sections, clauses).
+    *   `Parallel Clause Analysis`: Create parallel tasks to analyze each clause for specific issues (e.g., ambiguity, compliance, enforceability). This step can call the Researcher Agent as a tool.
+    *   `Synthesize Risk Report`: Aggregate all identified issues from the parallel analyses into a final, structured report for the user.
 
 ---
 
